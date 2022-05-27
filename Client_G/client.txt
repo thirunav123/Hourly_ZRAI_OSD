@@ -36,6 +36,9 @@ scheduler_delay=int(filedic.pop("scheduler_delay_in_milliseconds"))/1000
 server_reconnect_delay=int(filedic.pop("server_reconnect_delay_in_milliseconds"))/1000
 server_data_move_delay=int(filedic.pop("server_data_move_delay_in_milliseconds"))/1000
 it_register=int(filedic.pop("idletime_register_count"))
+prior_time=int(filedic.pop('prior_time_for_hourly_trigger_in_seconds'))
+
+
 # ta=filedic.pop("Total_A")
 # tb=filedic.pop("Total_B")
 # tc=filedic.pop("Total_C")
@@ -96,7 +99,6 @@ def shift_reset_job():
     # inf=2
     # hour=shift_total
     # ct=round(time.time())
-    write_flag=False
     try:
         for ip in ipaddresses_of_plc:
             # hpq=raw_dict[ip]["npq"]
@@ -111,24 +113,20 @@ def shift_reset_job():
             raw_dict[ip]["oit"]=0
             raw_dict[ip]["nit"]=0
             lock.release()
-        write_flag=False
 
         print("SRJ: All reset")
     except Exception as e:
-        if not write_flag:
-            error_register_queue.put(f'SRJ: {e}  {time.strftime("%d-%m-%Y_%I.%M.%S_%p")}\n')
-            write_flag=True
-            print(f'SRJ: Error acquired and recorded. Error: {e}') 
+        error_register_queue.put(f'SRJ: {e}  {time.strftime("%d-%m-%Y_%I.%M.%S_%p")}\n')
+        print(f'SRJ: Error acquired and recorded. Error: {e}') 
         time.sleep(error_wait)
 
 def hourly(hour):
-    write_flag=False
     try:
         inf=2
         # lock.acquire()
         for ip in ipaddresses_of_plc:
             if raw_dict[ip]["machine_status"]:
-                ct=round(time.time())
+                ct=round(time.time())-prior_time
                 hpq=raw_dict[ip]["npq"]-raw_dict[ip]["opq"]
                 hit=round(raw_dict[ip]["nit"]-raw_dict[ip]["oit"])
                 data=inf.to_bytes(1,'big')+raw_dict[ip]["name"].to_bytes(1,'big')+hour.to_bytes(1,'big')+raw_dict[ip]['on_off_count'].to_bytes(1,'big')+hpq.to_bytes(bytes_to_split,'big')+hit.to_bytes(bytes_to_split,'big')+raw_dict[ip]["npq"].to_bytes(bytes_to_split,'big')+raw_dict[ip]["nit"].to_bytes(bytes_to_split,'big')+ct.to_bytes(bytes_to_split,'big')
@@ -138,18 +136,14 @@ def hourly(hour):
                 raw_dict[ip]["oit"]=raw_dict[ip]["nit"]
                 lock.release()
                 print("H: Hourly message triggered   ",hour)
-        write_flag=False
 
     except Exception as e:
-        if not write_flag:
-            error_register_queue.put(f'H: {e}  {time.strftime("%d-%m-%Y_%I.%M.%S_%p")}\n')
-            write_flag=True
-            print(f'H: Error acquired and recorded. Error: {e}')
+        error_register_queue.put(f'H: {e}  {time.strftime("%d-%m-%Y_%I.%M.%S_%p")}\n')
+        print(f'H: Error acquired and recorded. Error: {e}')
         time.sleep(error_wait)
     # lock.release()
     
 def reset_thread():
-    write_flag=False
     try:
         # schedule.every().day.at(shiftA_start).do(shift_reset_job)
         # schedule.every().day.at(shiftB_start).do(shift_reset_job)
@@ -165,14 +159,10 @@ def reset_thread():
         while True:
             schedule.run_pending()
             time.sleep(scheduler_delay)
-            if write_flag:
-                write_flag=False
 
     except Exception as e:
-        if not write_flag:
-            error_register_queue.put(f'RT: {e}  {time.strftime("%d-%m-%Y_%I.%M.%S_%p")}\n')
-            write_flag=True
-            print(f'RT: Error acquired and recorded. Error: {e}')
+        error_register_queue.put(f'RT: {e}  {time.strftime("%d-%m-%Y_%I.%M.%S_%p")}\n')
+        print(f'RT: Error acquired and recorded. Error: {e}')
         time.sleep(error_wait)
 
 def error_register():
@@ -192,7 +182,7 @@ def pq_and_it_calc_thread(ip,pdq,plc):
     write_flag=False
     while True:
         try:
-                if raw_dict[ip]["machine_`status"]:
+                if raw_dict[ip]["machine_status"]:
                     inf=1
                     # if not pdq.empty():
                     pq_count=pdq.get()
@@ -381,7 +371,7 @@ def snap7_thread(ipaddress_of_plc,db_number,i,pdq):
                     # connection_flag=False
         except Exception as e:
             if not write_flag_1:
-                error_register_queue.put(f'SDM:: {e}  {time.strftime("%d-%m-%Y_%I.%M.%S_%p")}\n')
+                error_register_queue.put(f'ST{i}: {e}  {time.strftime("%d-%m-%Y_%I.%M.%S_%p")}\n')
                 write_flag_1=True
                 print(f'ST{i}: Error acquired and recorded. Error: {e}')
             else: 
@@ -394,16 +384,16 @@ for ip in ipaddresses_of_plc:
     sub_defalut_value_dic['name']=int(filedic[ip])
     raw_dict[ip]=sub_defalut_value_dic.copy()
 # raw_dict[i]["it"]=4903
-print(raw_dict)
+# print(raw_dict)
 
 for i in range(len(ipaddresses_of_plc)):
     plc_data_queue=queue.Queue()
     client_thread_pro = threading.Thread(target=snap7_thread,args=(ipaddresses_of_plc[i],int(db_numbers_of_plc_respectively[i]),i+1,plc_data_queue),daemon=True)
     client_thread_pro.start()
     pq_and_it_calc_th = threading.Thread(target=pq_and_it_calc_thread,args=(ipaddresses_of_plc[i],plc_data_queue,int(filedic[ipaddresses_of_plc[i]])),daemon=True)
-    print(ip)
+    # print(ip)
     pq_and_it_calc_th.start()
-    print(plc_data_queue)
+    # print(plc_data_queue)
     # raw_dict[ipaddresses_of_plc[i]]=sub_dict
     print(f"MT: Client_thread started {i+1}")
 
@@ -419,7 +409,7 @@ print(f"MT: Error_register thread started")
 
 while True:
     time.sleep(60)
-    print(raw_dict)
+    print(f"MT: {raw_dict}")
 # client=snap7.client.Client()
 # client.connect("192.168.0.1",0,1,102)
 # print(bool(client.get_connected))
