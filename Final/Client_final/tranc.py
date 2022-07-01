@@ -1,11 +1,24 @@
-import snap7,time,queue,threading,socket
+import snap7,time,queue,threading,socket,psutil,sys,os
+name_list=os.path.basename(__file__).split('.')
+name_list[-1]="exe"
+exe_name=".".join(name_list)
+print(exe_name)
+process_count=0
+for p in psutil.process_iter():
+    # print(p.name())
+    if p.name()==exe_name:
+        process_count=process_count+1
+        # print
+    if process_count>2:
+        print(process_count)
+        print("Already execution file ran")
+        sys.exit()       
 
 lock=threading.Lock()
-file=open('snap7_client_settings.txt','r')
+file=open('client_settings.txt','r')
 print('MT: I am a Client')
 filedic={}
-server_queue=queue.Queue()
-error_register_queue=queue.Queue()
+
 for line in file:
     file_data=line.strip().split('===')
     a=file_data[0]
@@ -14,13 +27,18 @@ for line in file:
 ipaddresses_of_plc=filedic.pop('ipaddresses_of_plc').split(',')
 ipaddress_of_server_system=filedic.pop('ipaddress_of_server_system')
 db_numbers_of_plc_respectively=filedic.pop('data_block_numbers_of_plc_respectively').split(',')
+rack_numbers_of_plc_respectively=filedic.pop('rack_numbers_of_plc_respectively').split(',')
+slot_numbers_of_plc_respectively=filedic.pop('slot_numbers_of_plc_respectively').split(',')
 port_of_server_system=int(filedic.pop('port_of_server_system'))
 plc_db_read_delay=int(filedic.pop('plc_db_read_delay_in_milliseconds'))/1000
 error_wait=int(filedic.pop('error_wait_in_milliseconds'))/1000
 server_reconnect_delay=int(filedic.pop('server_reconnect_delay_in_milliseconds'))/1000
 server_data_move_delay=int(filedic.pop('server_data_move_delay_in_milliseconds'))/1000
 sct=int(filedic.pop('server_connect_time_in_seconds'))
+max_size_server_queue=int(filedic.pop('maximum_size_server_queue'))
 print('MT: Settings file read')
+server_queue=queue.Queue(maxsize=max_size_server_queue)
+error_register_queue=queue.Queue()
 unique_no=None
 
 def server_data_move():
@@ -29,11 +47,12 @@ def server_data_move():
     while True:
         try:
             if not server_queue.empty():
-                soc_s=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
                 try:
+                    soc_s=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
                     soc_s.connect((ipaddress_of_server_system,port_of_server_system))
                 except:
                     time.sleep(server_reconnect_delay)
+                    print('SDM: Reconnecting to Server')
                     continue
                 data=server_queue.get()
                 soc_s.sendall(data)
@@ -60,7 +79,7 @@ def error_register():
             f.write(err)
         f.close()
 
-def snap7_thread(ipaddress_of_plc,db_number,plc):
+def snap7_thread(ipaddress_of_plc,db_number,rack,slot,plc):
             global unique_no
             write_flag=False
             connection_flag=False
@@ -73,7 +92,8 @@ def snap7_thread(ipaddress_of_plc,db_number,plc):
                     ct=round(time.time())
                     if not connection_flag:
                         client=snap7.client.Client()
-                        client.connect(ipaddress_of_plc,0,1,102)
+                        client.connect(ipaddress_of_plc,rack,slot)
+                        # client.connect(ipaddress_of_plc,0,1,102)
                         connection_flag=True
                     if pt+sct<ct:
                         data=client.db_read(db_number,0,6)
@@ -86,11 +106,15 @@ def snap7_thread(ipaddress_of_plc,db_number,plc):
                                 print(f'ST{plc}: Count Reset')
                         if not pc==cc:
                             server_data=plc.to_bytes(1,'big')+data[4:6]
+                            if server_queue.full():
+                                server_queue.get()
                             server_queue.put(server_data)
                             pc=cc
                         else:
                             temp=1
                             server_data=temp.to_bytes(1,'big')
+                            if server_queue.full():
+                                server_queue.get()
                             server_queue.put(server_data)
                         pt=ct
                         print(f'ST{plc}: Production Count = {cc}')
@@ -112,6 +136,8 @@ def snap7_thread(ipaddress_of_plc,db_number,plc):
                         if str(e)=="b' TCP : Unreachable peer'" or str(e)=="b' ISO : An error occurred during send TCP : Connection reset by peer'" or str(e)=="b' ISO : An error occurred during recv TCP : Connection timed out'":
                             off_no=65535
                             server_data=plc.to_bytes(1,'big')+off_no.to_bytes(2,'big')
+                            if server_queue.full():
+                                server_queue.get()
                             server_queue.put(server_data)
                             print(f'ST{plc}: Machine OFF')
                         write_flag=True
@@ -122,7 +148,7 @@ def snap7_thread(ipaddress_of_plc,db_number,plc):
 
 for index,ip in enumerate(ipaddresses_of_plc):
     plc=filedic[ip]
-    client_thread_pro = threading.Thread(target=snap7_thread,args=(ip,int(db_numbers_of_plc_respectively[index]),int(plc)),daemon=True)
+    client_thread_pro = threading.Thread(target=snap7_thread,args=(ip,int(db_numbers_of_plc_respectively[index]),int(rack_numbers_of_plc_respectively[index]),int(slot_numbers_of_plc_respectively[index]),int(plc)),daemon=True)
     client_thread_pro.start()
     print(f'MT: Client_thread started {plc}')
 
