@@ -1,0 +1,15 @@
+from aphyt import omron
+
+eip_instance = omron.n_series.NSeries()
+eip_instance.connect_explicit('192.168.1.236')
+eip_instance.register_session()
+eip_instance.update_variable_dictionary()
+reply = eip_instance.write_variable('Hourly_Count',1200)
+reply = eip_instance.read_variable('Hourly_Count')
+print("Hourly_Count: " + str(reply))
+reply = eip_instance.read_variable('Unique_Code')
+print("Unique_Code: " + str(reply))
+# print("HMI_LENGTH_SEN_2: " + str(reply))
+# print("Hourly_Count: " + str(reply))
+# reply = eip_instance.read_variable('Unique_Code')
+# print("Unique_Code: " + str(reply))
